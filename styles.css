@@ -242,6 +242,44 @@ tr.due-soon:hover td { background: #fef3c7; }
 
 canvas { max-height: 280px; }
 #chart-top { max-height: 380px; }
+#chart-pl { max-height: 320px; }
+
+.pl-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pl-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 4px;
+}
+.pl-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pl-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.card.pl-revenue { border-left-color: #3b82f6; }
+.card.pl-expense { border-left-color: #f59e0b; }
+.card.pl-profit { border-left-color: #94a3b8; }
+.card.pl-profit.positive { border-left-color: var(--paid); }
+.card.pl-profit.positive .card-value { color: var(--paid); }
+.card.pl-profit.negative { border-left-color: var(--unpaid); }
+.card.pl-profit.negative .card-value { color: var(--unpaid); }
+.card.pl-profit.neutral .card-value { color: var(--muted); }
+
+@media (max-width: 900px) {
+  .pl-cards { grid-template-columns: 1fr; }
+}
 
 .error {
   position: fixed;

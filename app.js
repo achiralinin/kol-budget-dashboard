@@ -3,9 +3,12 @@ const SHEET_ID = "1QnGzBIvHHHb1R1hEh49c4ZIhkJ1OHr3Qr8ifQPuNqVY";
 const API_KEY = "AIzaSyCmg3dl1ySRqFwP7Pdx_DS2yxmqFZbUjno";
 const CREDIT_DAYS = 60;
 const ALL_VALUE = "__all__";
+const REVENUE_TAB_NAMES = ["Revenue", "revenue", "REVENUE", "รายรับ", "ยอดเก็บลูกค้า", "ยอดรับ"];
 
 // === STATE ===
-let projects = []; // [{ gid, name }]
+let projects = []; // [{ gid, name }]  (excludes Revenue tab)
+let revenueTab = null; // { gid, name } or null
+let revenueByProject = {}; // { projectName: totalRevenue }
 let currentItems = []; // items for current selection
 const charts = {};
 
@@ -118,7 +121,7 @@ function isPaid(item) {
 }
 
 // === FETCH ===
-async function fetchProjectList() {
+async function fetchAllTabs() {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&fields=sheets.properties(sheetId,title,index,hidden)`;
   const res = await fetch(url);
   if (!res.ok) {
@@ -126,12 +129,53 @@ async function fetchProjectList() {
     throw new Error(`Sheets API ${res.status}: ${body.slice(0, 200)}`);
   }
   const data = await res.json();
-  const list = (data.sheets || [])
+  const all = (data.sheets || [])
     .map((s) => s.properties)
     .filter((p) => !p.hidden)
     .sort((a, b) => a.index - b.index)
     .map((p) => ({ gid: String(p.sheetId), name: p.title }));
-  return list;
+  // Separate revenue tab
+  const revenue = all.find((t) => REVENUE_TAB_NAMES.includes(t.name)) || null;
+  const projectList = all.filter((t) => t !== revenue);
+  return { projects: projectList, revenueTab: revenue };
+}
+
+async function fetchRevenueTab(tab) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${tab.gid}&_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`โหลด Revenue tab ไม่ได้ (HTTP ${res.status})`);
+  const rows = parseCSV(await res.text());
+
+  // Detect header — accept any row containing both a project-like and revenue-like column
+  const projectKeys = ["Project", "project", "โปรเจกต์", "โปรเจค", "Campaign"];
+  const revenueKeys = ["Revenue", "revenue", "REVENUE", "ยอดเก็บลูกค้า", "ยอดรับ", "ยอด", "Amount"];
+
+  let schema = null;
+  let projIdx = -1;
+  let revIdx = -1;
+  const totals = {};
+
+  for (const row of rows) {
+    if (!row || row.every((c) => !c || !c.trim())) { schema = null; continue; }
+    const trimmed = row.map((c) => (c || "").trim());
+
+    if (!schema) {
+      const pi = trimmed.findIndex((c) => projectKeys.includes(c));
+      const ri = trimmed.findIndex((c) => revenueKeys.includes(c));
+      if (pi >= 0 && ri >= 0) {
+        schema = trimmed;
+        projIdx = pi;
+        revIdx = ri;
+      }
+      continue;
+    }
+
+    const proj = trimmed[projIdx];
+    const rev = parseBudget(trimmed[revIdx]);
+    if (!proj || !rev) continue;
+    totals[proj] = (totals[proj] || 0) + rev;
+  }
+  return totals;
 }
 
 async function fetchSheetItems(gid, name) {
@@ -169,6 +213,90 @@ function computeStats(items) {
 }
 
 // === RENDERING ===
+function computePL(items, isAllView, selectedProjectName) {
+  const expense = items.reduce((s, x) => s + x.budget, 0);
+  let revenue;
+  let revenueSubText;
+  if (isAllView) {
+    revenue = Object.values(revenueByProject).reduce((s, v) => s + v, 0);
+    const matched = projects.filter((p) => revenueByProject[p.name]).length;
+    revenueSubText = `${matched}/${projects.length} โปรเจกต์มีข้อมูล`;
+  } else {
+    revenue = revenueByProject[selectedProjectName] || 0;
+    revenueSubText = revenue > 0 ? "เก็บแล้ว" : "ยังไม่มีข้อมูล Revenue";
+  }
+  const profit = revenue - expense;
+  const margin = revenue > 0 ? (profit / revenue) * 100 : null;
+  return { revenue, expense, profit, margin, revenueSubText };
+}
+
+function renderPL(items, isAllView, selectedProjectName) {
+  const section = document.getElementById("pl-section");
+  if (!revenueTab) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "";
+
+  const pl = computePL(items, isAllView, selectedProjectName);
+  document.getElementById("pl-revenue").textContent = formatBaht(pl.revenue);
+  document.getElementById("pl-revenue-sub").textContent = pl.revenueSubText;
+  document.getElementById("pl-expense").textContent = formatBaht(pl.expense);
+  document.getElementById("pl-profit").textContent = formatBaht(pl.profit);
+  document.getElementById("pl-margin").textContent =
+    pl.margin === null ? "—" : `Margin ${pl.margin.toFixed(1)}%`;
+
+  const card = document.getElementById("pl-profit-card");
+  card.classList.remove("positive", "negative", "neutral");
+  if (pl.revenue === 0) card.classList.add("neutral");
+  else if (pl.profit >= 0) card.classList.add("positive");
+  else card.classList.add("negative");
+
+  document.getElementById("pl-context").textContent =
+    isAllView ? "ภาพรวมทุกโปรเจกต์" : selectedProjectName;
+
+  // Per-project chart (only for All view)
+  const chartPanel = document.getElementById("pl-chart-panel");
+  if (isAllView) {
+    chartPanel.style.display = "";
+    renderPLChart();
+  } else {
+    chartPanel.style.display = "none";
+    if (charts["chart-pl"]) { charts["chart-pl"].destroy(); delete charts["chart-pl"]; }
+  }
+}
+
+function renderPLChart() {
+  // Build per-project P&L (project names from `projects`)
+  const rows = projects.map((p) => {
+    // Find items for this project (from currentItems, which in All view contains all)
+    const projItems = currentItems.filter((x) => x.project === p.name);
+    const expense = projItems.reduce((s, x) => s + x.budget, 0);
+    const revenue = revenueByProject[p.name] || 0;
+    return { name: p.name, revenue, expense, profit: revenue - expense };
+  }).sort((a, b) => b.profit - a.profit);
+
+  makeChart("chart-pl", {
+    type: "bar",
+    data: {
+      labels: rows.map((r) => r.name),
+      datasets: [
+        { label: "รายรับ", data: rows.map((r) => r.revenue), backgroundColor: "#3b82f6", borderRadius: 4 },
+        { label: "รายจ่าย", data: rows.map((r) => r.expense), backgroundColor: "#ef4444", borderRadius: 4 },
+        { label: "กำไร", data: rows.map((r) => r.profit), backgroundColor: rows.map((r) => r.profit >= 0 ? "#16a34a" : "#dc2626"), borderRadius: 4 },
+      ],
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: "bottom" },
+        tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${formatBaht(c.parsed.y)}` } },
+      },
+      scales: { y: { ticks: { callback: (v) => "฿" + (v / 1000) + "k" } } },
+    },
+  });
+}
+
 function renderStats(s) {
   document.getElementById("stat-total").textContent = formatBaht(s.total);
   document.getElementById("stat-total-count").textContent = `${s.totalCount} รายการ`;
@@ -436,6 +564,8 @@ async function loadCurrentSelection() {
     }
     const stats = computeStats(currentItems);
     renderStats(stats);
+    const projectName = isAllView ? null : projects.find((p) => p.gid === value)?.name;
+    renderPL(currentItems, isAllView, projectName);
     renderCharts(currentItems, stats, isAllView);
     renderDueTable(currentItems);
     renderAllTable(isAllView);
@@ -459,8 +589,23 @@ function showError(msg) {
 async function init() {
   document.getElementById("error").classList.add("hidden");
   try {
-    projects = await fetchProjectList();
-    if (projects.length === 0) throw new Error("ไม่พบ tab ใน sheet");
+    const tabs = await fetchAllTabs();
+    projects = tabs.projects;
+    revenueTab = tabs.revenueTab;
+    if (projects.length === 0) throw new Error("ไม่พบ project tab ใน sheet");
+
+    // Fetch revenue data if tab exists
+    if (revenueTab) {
+      try {
+        revenueByProject = await fetchRevenueTab(revenueTab);
+      } catch (e) {
+        console.warn("โหลด Revenue tab ไม่สำเร็จ:", e);
+        revenueByProject = {};
+      }
+    } else {
+      revenueByProject = {};
+    }
+
     populateProjectSelect();
     await loadCurrentSelection();
   } catch (e) {

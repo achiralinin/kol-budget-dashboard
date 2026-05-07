@@ -27,6 +27,34 @@
   </header>
 
   <main class="container">
+    <section class="pl-section" id="pl-section">
+      <div class="pl-header">
+        <h2>กำไร-ขาดทุน</h2>
+        <span id="pl-context" class="muted small"></span>
+      </div>
+      <div class="pl-cards">
+        <div class="card pl-revenue">
+          <div class="card-label">รายรับ (เก็บลูกค้า)</div>
+          <div class="card-value" id="pl-revenue">—</div>
+          <div class="card-sub" id="pl-revenue-sub">—</div>
+        </div>
+        <div class="card pl-expense">
+          <div class="card-label">รายจ่าย (KOL)</div>
+          <div class="card-value" id="pl-expense">—</div>
+          <div class="card-sub muted">งบ KOL รวมทั้งหมด</div>
+        </div>
+        <div class="card pl-profit" id="pl-profit-card">
+          <div class="card-label">กำไรสุทธิ</div>
+          <div class="card-value" id="pl-profit">—</div>
+          <div class="card-sub" id="pl-margin">—</div>
+        </div>
+      </div>
+      <div class="panel pl-chart-panel" id="pl-chart-panel" style="display:none">
+        <h2>กำไรแยกตามโปรเจกต์</h2>
+        <canvas id="chart-pl"></canvas>
+      </div>
+    </section>
+
     <section class="cards" id="stats-cards">
       <div class="card"><div class="card-label">งบรวมทั้งหมด</div><div class="card-value" id="stat-total">—</div><div class="card-sub" id="stat-total-count">— รายการ</div></div>
       <div class="card paid"><div class="card-label">จ่ายแล้ว</div><div class="card-value" id="stat-paid">—</div><div class="card-sub" id="stat-paid-count">— รายการ</div></div>
