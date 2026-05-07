@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KOL Budget Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div>
+        <h1>KOL Budget Dashboard</h1>
+        <p id="last-updated" class="muted">กำลังโหลดข้อมูล…</p>
+      </div>
+      <button id="refresh-btn" class="btn">รีเฟรช</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="cards" id="stats-cards">
+      <div class="card"><div class="card-label">งบรวมทั้งหมด</div><div class="card-value" id="stat-total">—</div><div class="card-sub" id="stat-total-count">— รายการ</div></div>
+      <div class="card paid"><div class="card-label">จ่ายแล้ว</div><div class="card-value" id="stat-paid">—</div><div class="card-sub" id="stat-paid-count">— รายการ</div></div>
+      <div class="card unpaid"><div class="card-label">ยังไม่จ่าย</div><div class="card-value" id="stat-unpaid">—</div><div class="card-sub" id="stat-unpaid-count">— รายการ</div></div>
+      <div class="card warn"><div class="card-label">ครบกำหนดใน 7 วัน</div><div class="card-value" id="stat-due-soon">—</div><div class="card-sub" id="stat-overdue">เกินกำหนด: —</div></div>
+    </section>
+
+    <section class="row">
+      <div class="panel">
+        <h2>สัดส่วนสถานะ</h2>
+        <canvas id="chart-status"></canvas>
+      </div>
+      <div class="panel">
+        <h2>บุคคล vs บริษัท</h2>
+        <canvas id="chart-type"></canvas>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Top 10 งบสูงสุด</h2>
+      <canvas id="chart-top"></canvas>
+    </section>
+
+    <section class="panel">
+      <h2>ครบกำหนด credit term</h2>
+      <p class="muted small">เฉพาะรายการที่มี Post Date (เครดิต 60 วัน) และยังไม่จ่าย</p>
+      <div class="table-wrap">
+        <table id="due-table">
+          <thead><tr><th>KOLs</th><th class="num">Budget</th><th>Post Date</th><th>วันครบกำหนด</th><th class="num">เหลือ (วัน)</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>รายการทั้งหมด</h2>
+        <div class="filters">
+          <input id="search" type="search" placeholder="ค้นหาชื่อ KOL…" />
+          <select id="filter-status">
+            <option value="all">สถานะทั้งหมด</option>
+            <option value="paid">จ่ายแล้ว</option>
+            <option value="unpaid">ยังไม่จ่าย</option>
+          </select>
+          <select id="filter-type">
+            <option value="all">ประเภททั้งหมด</option>
+            <option value="บุคคล">บุคคล</option>
+            <option value="บริษัท">บริษัท</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="all-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th data-sort="name">KOLs</th>
+              <th data-sort="type">ประเภท</th>
+              <th data-sort="budget" class="num">Budget</th>
+              <th data-sort="postDate">Post Date</th>
+              <th data-sort="withdrawDate">วันเบิก</th>
+              <th data-sort="payDate">วันจ่าย</th>
+              <th data-sort="status">Status</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="error" class="error hidden"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
