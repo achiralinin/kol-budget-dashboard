@@ -12,11 +12,17 @@
 <body>
   <header class="topbar">
     <div class="topbar-inner">
-      <div>
+      <div class="topbar-left">
         <h1>KOL Budget Dashboard</h1>
         <p id="last-updated" class="muted">กำลังโหลดข้อมูล…</p>
       </div>
-      <button id="refresh-btn" class="btn">รีเฟรช</button>
+      <div class="topbar-right">
+        <label class="project-picker">
+          <span class="muted small">โปรเจกต์</span>
+          <select id="project-select"></select>
+        </label>
+        <button id="refresh-btn" class="btn">รีเฟรช</button>
+      </div>
     </div>
   </header>
 
@@ -33,7 +39,7 @@
         <h2>สัดส่วนสถานะ</h2>
         <canvas id="chart-status"></canvas>
       </div>
-      <div class="panel">
+      <div class="panel" id="chart-type-panel">
         <h2>บุคคล vs บริษัท</h2>
         <canvas id="chart-type"></canvas>
       </div>
@@ -77,6 +83,7 @@
           <thead>
             <tr>
               <th>#</th>
+              <th data-sort="project" class="project-col">โปรเจกต์</th>
               <th data-sort="name">KOLs</th>
               <th data-sort="type">ประเภท</th>
               <th data-sort="budget" class="num">Budget</th>

@@ -1,11 +1,12 @@
 // === CONFIG ===
 const SHEET_ID = "1QnGzBIvHHHb1R1hEh49c4ZIhkJ1OHr3Qr8ifQPuNqVY";
-const GID = "0";
-const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${GID}`;
+const API_KEY = "AIzaSyCmg3dl1ySRqFwP7Pdx_DS2yxmqFZbUjno";
 const CREDIT_DAYS = 60;
+const ALL_VALUE = "__all__";
 
 // === STATE ===
-let allItems = [];
+let projects = []; // [{ gid, name }]
+let currentItems = []; // items for current selection
 const charts = {};
 
 // === CSV PARSER ===
@@ -71,13 +72,12 @@ function todayUTC() {
 }
 
 // === PARSE ROWS INTO ITEMS ===
-function parseData(rows) {
+function parseData(rows, projectName) {
   const items = [];
   let schema = null;
   for (const row of rows) {
     if (!row || row.every((c) => !c || !c.trim())) { schema = null; continue; }
     const first = (row[0] || "").trim();
-    // header detection: starts with "#"
     if (first === "#") {
       schema = row.map((c) => (c || "").trim());
       continue;
@@ -91,13 +91,13 @@ function parseData(rows) {
     const hasPostDate = schema.includes("Post Date");
     const postDate = hasPostDate ? parseDate(obj["Post Date"]) : null;
     const payDate = parseDate(obj["DATE (วันจ่าย)"] || "");
-    // Compute due date: prefer explicit pay date, else postDate + 60d
     let dueDate = payDate;
     if (!dueDate && postDate) {
       dueDate = new Date(postDate.getTime() + CREDIT_DAYS * 24 * 60 * 60 * 1000);
     }
 
     items.push({
+      project: projectName,
       no: obj["#"],
       name: obj["KOLs"] || "",
       type: obj["บุคคล/บริษัท"] || "",
@@ -115,6 +115,31 @@ function parseData(rows) {
 
 function isPaid(item) {
   return item.status.includes("จ่ายแล้ว");
+}
+
+// === FETCH ===
+async function fetchProjectList() {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}?key=${API_KEY}&fields=sheets.properties(sheetId,title,index,hidden)`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Sheets API ${res.status}: ${body.slice(0, 200)}`);
+  }
+  const data = await res.json();
+  const list = (data.sheets || [])
+    .map((s) => s.properties)
+    .filter((p) => !p.hidden)
+    .sort((a, b) => a.index - b.index)
+    .map((p) => ({ gid: String(p.sheetId), name: p.title }));
+  return list;
+}
+
+async function fetchSheetItems(gid, name) {
+  const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${gid}&_=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`โหลด tab "${name}" ไม่ได้ (HTTP ${res.status})`);
+  const text = await res.text();
+  return parseData(parseCSV(text), name);
 }
 
 // === STATS ===
@@ -161,7 +186,7 @@ function makeChart(id, config) {
   charts[id] = new Chart(ctx, config);
 }
 
-function renderCharts(items, stats) {
+function renderCharts(items, stats, isAllView) {
   // Status pie
   makeChart("chart-status", {
     type: "doughnut",
@@ -182,32 +207,63 @@ function renderCharts(items, stats) {
     },
   });
 
-  // Type pie
-  const byType = {};
-  for (const x of items) {
-    const t = x.type || "ไม่ระบุ";
-    byType[t] = (byType[t] || 0) + x.budget;
-  }
-  const typeLabels = Object.keys(byType);
-  const typeData = typeLabels.map((k) => byType[k]);
-  makeChart("chart-type", {
-    type: "doughnut",
-    data: {
-      labels: typeLabels,
-      datasets: [{
-        data: typeData,
-        backgroundColor: ["#3b82f6", "#a855f7", "#f59e0b", "#64748b"],
-        borderWidth: 0,
-      }],
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { position: "bottom" },
-        tooltip: { callbacks: { label: (c) => `${c.label}: ${formatBaht(c.parsed)}` } },
+  // Second chart: type breakdown OR per-project (depending on view)
+  const secondPanelTitle = document.querySelector("#chart-type-panel h2");
+  if (isAllView) {
+    if (secondPanelTitle) secondPanelTitle.textContent = "งบรวมแยกตามโปรเจกต์";
+    const byProject = {};
+    for (const x of items) {
+      const k = x.project || "ไม่ระบุ";
+      byProject[k] = (byProject[k] || 0) + x.budget;
+    }
+    const labels = Object.keys(byProject);
+    const values = labels.map((k) => byProject[k]);
+    makeChart("chart-type", {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: ["#3b82f6", "#a855f7", "#f59e0b", "#10b981", "#f43f5e", "#06b6d4", "#84cc16", "#8b5cf6"],
+          borderWidth: 0,
+        }],
       },
-    },
-  });
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (c) => `${c.label}: ${formatBaht(c.parsed)}` } },
+        },
+      },
+    });
+  } else {
+    if (secondPanelTitle) secondPanelTitle.textContent = "บุคคล vs บริษัท";
+    const byType = {};
+    for (const x of items) {
+      const t = x.type || "ไม่ระบุ";
+      byType[t] = (byType[t] || 0) + x.budget;
+    }
+    const labels = Object.keys(byType);
+    const values = labels.map((k) => byType[k]);
+    makeChart("chart-type", {
+      type: "doughnut",
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: ["#3b82f6", "#a855f7", "#f59e0b", "#64748b"],
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { position: "bottom" },
+          tooltip: { callbacks: { label: (c) => `${c.label}: ${formatBaht(c.parsed)}` } },
+        },
+      },
+    });
+  }
 
   // Top 10
   const top = [...items].sort((a, b) => b.budget - a.budget).slice(0, 10);
@@ -227,7 +283,12 @@ function renderCharts(items, stats) {
       responsive: true,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (c) => formatBaht(c.parsed.x) } },
+        tooltip: {
+          callbacks: {
+            label: (c) => formatBaht(c.parsed.x),
+            afterLabel: (c) => isAllView ? `โปรเจกต์: ${top[c.dataIndex].project}` : "",
+          },
+        },
       },
       scales: {
         x: { ticks: { callback: (v) => "฿" + (v / 1000) + "k" } },
@@ -280,12 +341,12 @@ function escape(s) {
 let sortKey = "budget";
 let sortDir = "desc";
 
-function renderAllTable() {
+function renderAllTable(isAllView) {
   const search = document.getElementById("search").value.toLowerCase().trim();
   const fStatus = document.getElementById("filter-status").value;
   const fType = document.getElementById("filter-type").value;
 
-  let filtered = allItems.filter((x) => {
+  let filtered = currentItems.filter((x) => {
     if (search && !x.name.toLowerCase().includes(search)) return false;
     if (fStatus === "paid" && !isPaid(x)) return false;
     if (fStatus === "unpaid" && isPaid(x)) return false;
@@ -307,12 +368,19 @@ function renderAllTable() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
+  // Toggle project column visibility
+  document.querySelectorAll(".project-col").forEach((el) => {
+    el.style.display = isAllView ? "" : "none";
+  });
+
   const tbody = document.querySelector("#all-table tbody");
   tbody.innerHTML = "";
   for (const [i, x] of filtered.entries()) {
     const tr = document.createElement("tr");
+    const projectCell = isAllView ? `<td class="project-col">${escape(x.project)}</td>` : "";
     tr.innerHTML = `
       <td>${i + 1}</td>
+      ${projectCell}
       <td>${escape(x.name)}</td>
       <td>${escape(x.type)}</td>
       <td class="num">${formatBaht(x.budget)}</td>
@@ -325,48 +393,104 @@ function renderAllTable() {
   }
 }
 
-// === MAIN ===
-async function load() {
-  const errEl = document.getElementById("error");
-  errEl.classList.add("hidden");
-  document.getElementById("last-updated").textContent = "กำลังโหลดข้อมูล…";
-  try {
-    const res = await fetch(CSV_URL + "&_=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status} — ตรวจสอบว่าชีตตั้งค่าเป็น "Anyone with the link can view"`);
-    const text = await res.text();
-    const rows = parseCSV(text);
-    allItems = parseData(rows);
-    if (allItems.length === 0) throw new Error("ไม่พบข้อมูลในชีต — ตรวจสอบว่ามีหัวตารางขึ้นต้นด้วย \"#\"");
+// === PROJECT SELECTION ===
+function populateProjectSelect() {
+  const sel = document.getElementById("project-select");
+  sel.innerHTML = "";
+  const all = document.createElement("option");
+  all.value = ALL_VALUE;
+  all.textContent = `ภาพรวมทุกโปรเจกต์ (${projects.length})`;
+  sel.appendChild(all);
+  for (const p of projects) {
+    const o = document.createElement("option");
+    o.value = p.gid;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+  // Restore from URL hash
+  const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+  const gid = hash.get("gid");
+  if (gid && (gid === ALL_VALUE || projects.some((p) => p.gid === gid))) {
+    sel.value = gid;
+  }
+}
 
-    const stats = computeStats(allItems);
+async function loadCurrentSelection() {
+  const sel = document.getElementById("project-select");
+  const value = sel.value;
+  const isAllView = value === ALL_VALUE;
+
+  // Update URL hash
+  const hash = new URLSearchParams();
+  hash.set("gid", value);
+  history.replaceState(null, "", "#" + hash.toString());
+
+  document.getElementById("last-updated").textContent = "กำลังโหลด…";
+  try {
+    if (isAllView) {
+      const results = await Promise.all(projects.map((p) => fetchSheetItems(p.gid, p.name)));
+      currentItems = results.flat();
+    } else {
+      const p = projects.find((p) => p.gid === value);
+      currentItems = await fetchSheetItems(p.gid, p.name);
+    }
+    const stats = computeStats(currentItems);
     renderStats(stats);
-    renderCharts(allItems, stats);
-    renderDueTable(allItems);
-    renderAllTable();
+    renderCharts(currentItems, stats, isAllView);
+    renderDueTable(currentItems);
+    renderAllTable(isAllView);
 
     const now = new Date();
     document.getElementById("last-updated").textContent =
       `อัพเดทล่าสุด: ${now.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" })}`;
   } catch (e) {
+    showError(e.message);
+  }
+}
+
+function showError(msg) {
+  const errEl = document.getElementById("error");
+  errEl.textContent = "โหลดข้อมูลไม่สำเร็จ: " + msg;
+  errEl.classList.remove("hidden");
+  document.getElementById("last-updated").textContent = "โหลดล้มเหลว";
+}
+
+// === MAIN ===
+async function init() {
+  document.getElementById("error").classList.add("hidden");
+  try {
+    projects = await fetchProjectList();
+    if (projects.length === 0) throw new Error("ไม่พบ tab ใน sheet");
+    populateProjectSelect();
+    await loadCurrentSelection();
+  } catch (e) {
     console.error(e);
-    errEl.textContent = "โหลดข้อมูลไม่สำเร็จ: " + e.message;
-    errEl.classList.remove("hidden");
-    document.getElementById("last-updated").textContent = "โหลดล้มเหลว";
+    showError(e.message);
   }
 }
 
 // Event wiring
-document.getElementById("refresh-btn").addEventListener("click", load);
-document.getElementById("search").addEventListener("input", renderAllTable);
-document.getElementById("filter-status").addEventListener("change", renderAllTable);
-document.getElementById("filter-type").addEventListener("change", renderAllTable);
+document.getElementById("refresh-btn").addEventListener("click", init);
+document.getElementById("project-select").addEventListener("change", () => {
+  document.getElementById("error").classList.add("hidden");
+  loadCurrentSelection();
+});
+document.getElementById("search").addEventListener("input", () => {
+  renderAllTable(document.getElementById("project-select").value === ALL_VALUE);
+});
+document.getElementById("filter-status").addEventListener("change", () => {
+  renderAllTable(document.getElementById("project-select").value === ALL_VALUE);
+});
+document.getElementById("filter-type").addEventListener("change", () => {
+  renderAllTable(document.getElementById("project-select").value === ALL_VALUE);
+});
 document.querySelectorAll("#all-table th[data-sort]").forEach((th) => {
   th.addEventListener("click", () => {
     const key = th.dataset.sort;
     if (sortKey === key) sortDir = sortDir === "asc" ? "desc" : "asc";
     else { sortKey = key; sortDir = "desc"; }
-    renderAllTable();
+    renderAllTable(document.getElementById("project-select").value === ALL_VALUE);
   });
 });
 
-load();
+init();

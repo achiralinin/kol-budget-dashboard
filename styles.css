@@ -37,7 +37,35 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
 }
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.project-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.project-picker span { font-size: 11px; }
+.project-picker select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: white;
+  outline: none;
+  min-width: 220px;
+  max-width: 320px;
+}
+.project-picker select:focus { border-color: var(--accent); }
 
 .topbar h1 {
   margin: 0;
