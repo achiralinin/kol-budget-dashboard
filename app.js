@@ -1,5 +1,6 @@
 // === CONFIG ===
 const SHEET_ID = "1QnGzBIvHHHb1R1hEh49c4ZIhkJ1OHr3Qr8ifQPuNqVY";
+const MEDIA_SHEET_ID = "1jbvsms2cT1turJkk-MQFi6welsf61YAUD4Dtvt0PpJU";
 const API_KEY = "AIzaSyCmg3dl1ySRqFwP7Pdx_DS2yxmqFZbUjno";
 const CREDIT_DAYS = 60;
 const ALL_VALUE = "__all__";
@@ -8,7 +9,8 @@ const REVENUE_TAB_NAMES = ["Revenue", "revenue", "REVENUE", "รายรับ"
 // === STATE ===
 let projects = []; // [{ gid, name }]  (excludes Revenue tab)
 let revenueTab = null; // { gid, name } or null
-let revenueByProject = {}; // { projectName: totalRevenue }
+let revenueByProject = {}; // { projectName: totalRevenue }  (KOL revenue from Sheet 1's Revenue tab)
+let mediaByProject = {}; // { projectName: { creativeFee, mediaRevenue, mediaSpent } } (from Sheet 2)
 let currentItems = []; // items for current selection
 const charts = {};
 
@@ -140,6 +142,66 @@ async function fetchAllTabs() {
   return { projects: projectList, revenueTab: revenue };
 }
 
+async function fetchMediaSheet() {
+  if (!MEDIA_SHEET_ID) return {};
+  const metaUrl = `https://sheets.googleapis.com/v4/spreadsheets/${MEDIA_SHEET_ID}?key=${API_KEY}&fields=sheets.properties(sheetId,title,index,hidden)`;
+  const metaRes = await fetch(metaUrl);
+  if (!metaRes.ok) {
+    const body = await metaRes.text();
+    throw new Error(`Sheet 2 metadata: ${metaRes.status} ${body.slice(0, 200)}`);
+  }
+  const meta = await metaRes.json();
+  const tabs = (meta.sheets || [])
+    .map((s) => s.properties)
+    .filter((p) => !p.hidden)
+    .sort((a, b) => a.index - b.index);
+
+  const result = {};
+  for (const tab of tabs) {
+    const csvUrl = `https://docs.google.com/spreadsheets/d/${MEDIA_SHEET_ID}/export?format=csv&gid=${tab.sheetId}&_=${Date.now()}`;
+    try {
+      const res = await fetch(csvUrl, { cache: "no-store" });
+      if (!res.ok) continue;
+      const rows = parseCSV(await res.text());
+      parseMediaRows(rows, result);
+    } catch (e) {
+      console.warn(`โหลด Sheet 2 tab "${tab.title}" ไม่สำเร็จ:`, e);
+    }
+  }
+  return result;
+}
+
+function parseMediaRows(rows, result) {
+  const projectKeys = ["Project", "project", "PROJECT", "โปรเจกต์", "โปรเจค", "Campaign"];
+  const creativeKeys = ["Creative Fee Revenue", "Creative Fee", "Creative Revenue", "ค่า Creative", "Creative"];
+  const mediaRevKeys = ["Media Revenue", "media revenue", "ยอดเก็บ Media", "เก็บค่า Media", "ยอดเก็บลูกค้า Media"];
+  const mediaSpentKeys = ["Media Spent", "Media Spend", "Media Actual", "ใช้จริง Media", "ยอดจ่าย Media"];
+
+  let schema = null;
+  let pi = -1, ci = -1, mri = -1, msi = -1;
+
+  for (const row of rows) {
+    if (!row || row.every((c) => !c || !c.trim())) { schema = null; continue; }
+    const trimmed = row.map((c) => (c || "").trim());
+    if (!schema) {
+      pi = trimmed.findIndex((c) => projectKeys.includes(c));
+      ci = trimmed.findIndex((c) => creativeKeys.includes(c));
+      mri = trimmed.findIndex((c) => mediaRevKeys.includes(c));
+      msi = trimmed.findIndex((c) => mediaSpentKeys.includes(c));
+      if (pi >= 0 && (ci >= 0 || mri >= 0 || msi >= 0)) {
+        schema = trimmed;
+      }
+      continue;
+    }
+    const proj = trimmed[pi];
+    if (!proj) continue;
+    if (!result[proj]) result[proj] = { creativeFee: 0, mediaRevenue: 0, mediaSpent: 0 };
+    if (ci >= 0) result[proj].creativeFee += parseBudget(trimmed[ci]);
+    if (mri >= 0) result[proj].mediaRevenue += parseBudget(trimmed[mri]);
+    if (msi >= 0) result[proj].mediaSpent += parseBudget(trimmed[msi]);
+  }
+}
+
 async function fetchRevenueTab(tab) {
   const url = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv&gid=${tab.gid}&_=${Date.now()}`;
   const res = await fetch(url, { cache: "no-store" });
@@ -214,25 +276,63 @@ function computeStats(items) {
 
 // === RENDERING ===
 function computePL(items, isAllView, selectedProjectName) {
-  const expense = items.reduce((s, x) => s + x.budget, 0);
-  let revenue;
-  let revenueSubText;
+  // KOL expense = sum of Budget from project tabs
+  const kolExpense = items.reduce((s, x) => s + x.budget, 0);
+
+  // Collect revenue + media data
+  let kolRevenue = 0, creativeFee = 0, mediaRevenue = 0, mediaSpent = 0;
+
   if (isAllView) {
-    revenue = Object.values(revenueByProject).reduce((s, v) => s + v, 0);
-    const matched = projects.filter((p) => revenueByProject[p.name]).length;
-    revenueSubText = `${matched}/${projects.length} โปรเจกต์มีข้อมูล`;
+    kolRevenue = Object.values(revenueByProject).reduce((s, v) => s + v, 0);
+    for (const p of projects) {
+      const m = mediaByProject[p.name];
+      if (m) {
+        creativeFee += m.creativeFee;
+        mediaRevenue += m.mediaRevenue;
+        mediaSpent += m.mediaSpent;
+      }
+    }
   } else {
-    revenue = revenueByProject[selectedProjectName] || 0;
-    revenueSubText = revenue > 0 ? "เก็บแล้ว" : "ยังไม่มีข้อมูล Revenue";
+    kolRevenue = revenueByProject[selectedProjectName] || 0;
+    const m = mediaByProject[selectedProjectName];
+    if (m) {
+      creativeFee = m.creativeFee;
+      mediaRevenue = m.mediaRevenue;
+      mediaSpent = m.mediaSpent;
+    }
   }
+
+  const revenue = kolRevenue + creativeFee + mediaRevenue;
+  const expense = kolExpense + mediaSpent;
   const profit = revenue - expense;
   const margin = revenue > 0 ? (profit / revenue) * 100 : null;
-  return { revenue, expense, profit, margin, revenueSubText };
+
+  // Build breakdown text
+  const revParts = [];
+  if (kolRevenue) revParts.push(`KOL ${formatBahtShort(kolRevenue)}`);
+  if (creativeFee) revParts.push(`Creative ${formatBahtShort(creativeFee)}`);
+  if (mediaRevenue) revParts.push(`Media ${formatBahtShort(mediaRevenue)}`);
+  const revenueSubText = revParts.length ? revParts.join(" • ") : "ยังไม่มีข้อมูลรายรับ";
+
+  const expParts = [];
+  if (kolExpense) expParts.push(`KOL ${formatBahtShort(kolExpense)}`);
+  if (mediaSpent) expParts.push(`Media ${formatBahtShort(mediaSpent)}`);
+  const expenseSubText = expParts.length ? expParts.join(" • ") : "—";
+
+  return { revenue, expense, profit, margin, revenueSubText, expenseSubText,
+    breakdown: { kolRevenue, creativeFee, mediaRevenue, kolExpense, mediaSpent } };
+}
+
+function formatBahtShort(n) {
+  if (Math.abs(n) >= 1_000_000) return "฿" + (n / 1_000_000).toFixed(2) + "M";
+  if (Math.abs(n) >= 1_000) return "฿" + Math.round(n / 1_000) + "k";
+  return "฿" + Math.round(n);
 }
 
 function renderPL(items, isAllView, selectedProjectName) {
   const section = document.getElementById("pl-section");
-  if (!revenueTab) {
+  const hasAnyPLSource = revenueTab || Object.keys(mediaByProject).length > 0;
+  if (!hasAnyPLSource) {
     section.style.display = "none";
     return;
   }
@@ -242,6 +342,7 @@ function renderPL(items, isAllView, selectedProjectName) {
   document.getElementById("pl-revenue").textContent = formatBaht(pl.revenue);
   document.getElementById("pl-revenue-sub").textContent = pl.revenueSubText;
   document.getElementById("pl-expense").textContent = formatBaht(pl.expense);
+  document.querySelector("#pl-section .pl-expense .card-sub").textContent = pl.expenseSubText;
   document.getElementById("pl-profit").textContent = formatBaht(pl.profit);
   document.getElementById("pl-margin").textContent =
     pl.margin === null ? "—" : `Margin ${pl.margin.toFixed(1)}%`;
@@ -267,12 +368,13 @@ function renderPL(items, isAllView, selectedProjectName) {
 }
 
 function renderPLChart() {
-  // Build per-project P&L (project names from `projects`)
   const rows = projects.map((p) => {
-    // Find items for this project (from currentItems, which in All view contains all)
     const projItems = currentItems.filter((x) => x.project === p.name);
-    const expense = projItems.reduce((s, x) => s + x.budget, 0);
-    const revenue = revenueByProject[p.name] || 0;
+    const kolExpense = projItems.reduce((s, x) => s + x.budget, 0);
+    const kolRevenue = revenueByProject[p.name] || 0;
+    const m = mediaByProject[p.name] || { creativeFee: 0, mediaRevenue: 0, mediaSpent: 0 };
+    const revenue = kolRevenue + m.creativeFee + m.mediaRevenue;
+    const expense = kolExpense + m.mediaSpent;
     return { name: p.name, revenue, expense, profit: revenue - expense };
   }).sort((a, b) => b.profit - a.profit);
 
@@ -594,17 +696,15 @@ async function init() {
     revenueTab = tabs.revenueTab;
     if (projects.length === 0) throw new Error("ไม่พบ project tab ใน sheet");
 
-    // Fetch revenue data if tab exists
-    if (revenueTab) {
-      try {
-        revenueByProject = await fetchRevenueTab(revenueTab);
-      } catch (e) {
-        console.warn("โหลด Revenue tab ไม่สำเร็จ:", e);
-        revenueByProject = {};
-      }
-    } else {
-      revenueByProject = {};
-    }
+    // Fetch revenue + media in parallel
+    const [revRes, mediaRes] = await Promise.allSettled([
+      revenueTab ? fetchRevenueTab(revenueTab) : Promise.resolve({}),
+      fetchMediaSheet(),
+    ]);
+    revenueByProject = revRes.status === "fulfilled" ? revRes.value : {};
+    mediaByProject = mediaRes.status === "fulfilled" ? mediaRes.value : {};
+    if (revRes.status === "rejected") console.warn("Revenue tab error:", revRes.reason);
+    if (mediaRes.status === "rejected") console.warn("Sheet 2 error:", mediaRes.reason);
 
     populateProjectSelect();
     await loadCurrentSelection();
