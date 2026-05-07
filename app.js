@@ -347,6 +347,28 @@ function renderPL(items, isAllView, selectedProjectName) {
   document.getElementById("pl-margin").textContent =
     pl.margin === null ? "—" : `Margin ${pl.margin.toFixed(1)}%`;
 
+  // === Breakdown cards ===
+  const b = pl.breakdown;
+  // Creative Fee — pure revenue
+  document.getElementById("bk-creative").textContent = formatBaht(b.creativeFee);
+  // Media — net (Rev - Spent)
+  const mediaNet = b.mediaRevenue - b.mediaSpent;
+  document.getElementById("bk-media").textContent = formatBaht(mediaNet);
+  document.getElementById("bk-media-sub").textContent =
+    (b.mediaRevenue || b.mediaSpent)
+      ? `Rev ${formatBahtShort(b.mediaRevenue)} • Spent ${formatBahtShort(b.mediaSpent)}`
+      : "ยังไม่มีข้อมูล";
+  setSign("bk-media-card", mediaNet, b.mediaRevenue || b.mediaSpent);
+  // KOL — net (Rev - Exp)
+  const kolNet = b.kolRevenue - b.kolExpense;
+  document.getElementById("bk-kol").textContent = formatBaht(kolNet);
+  document.getElementById("bk-kol-sub").textContent =
+    (b.kolRevenue || b.kolExpense)
+      ? `Rev ${formatBahtShort(b.kolRevenue)} • Exp ${formatBahtShort(b.kolExpense)}`
+      : "ยังไม่มีข้อมูล";
+  setSign("bk-kol-card", kolNet, b.kolRevenue || b.kolExpense);
+
+  // Profit card sign
   const card = document.getElementById("pl-profit-card");
   card.classList.remove("positive", "negative", "neutral");
   if (pl.revenue === 0) card.classList.add("neutral");
@@ -365,6 +387,14 @@ function renderPL(items, isAllView, selectedProjectName) {
     chartPanel.style.display = "none";
     if (charts["chart-pl"]) { charts["chart-pl"].destroy(); delete charts["chart-pl"]; }
   }
+}
+
+function setSign(elId, value, hasData) {
+  const el = document.getElementById(elId);
+  el.classList.remove("positive", "negative", "neutral");
+  if (!hasData) el.classList.add("neutral");
+  else if (value >= 0) el.classList.add("positive");
+  else el.classList.add("negative");
 }
 
 function renderPLChart() {

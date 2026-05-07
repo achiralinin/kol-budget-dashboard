@@ -34,12 +34,12 @@
       </div>
       <div class="pl-cards">
         <div class="card pl-revenue">
-          <div class="card-label">รายรับ</div>
+          <div class="card-label">รายรับรวม</div>
           <div class="card-value" id="pl-revenue">—</div>
           <div class="card-sub" id="pl-revenue-sub">—</div>
         </div>
         <div class="card pl-expense">
-          <div class="card-label">รายจ่าย</div>
+          <div class="card-label">รายจ่ายรวม</div>
           <div class="card-value" id="pl-expense">—</div>
           <div class="card-sub">—</div>
         </div>
@@ -47,6 +47,23 @@
           <div class="card-label">กำไรสุทธิ</div>
           <div class="card-value" id="pl-profit">—</div>
           <div class="card-sub" id="pl-margin">—</div>
+        </div>
+      </div>
+      <div class="pl-breakdown">
+        <div class="card bk-creative">
+          <div class="card-label">Creative Fee</div>
+          <div class="card-value" id="bk-creative">—</div>
+          <div class="card-sub muted">รายรับ (ไม่มีต้นทุน)</div>
+        </div>
+        <div class="card bk-media" id="bk-media-card">
+          <div class="card-label">Media (Net)</div>
+          <div class="card-value" id="bk-media">—</div>
+          <div class="card-sub" id="bk-media-sub">—</div>
+        </div>
+        <div class="card bk-kol" id="bk-kol-card">
+          <div class="card-label">KOL (Net)</div>
+          <div class="card-value" id="bk-kol">—</div>
+          <div class="card-sub" id="bk-kol-sub">—</div>
         </div>
       </div>
       <div class="panel pl-chart-panel" id="pl-chart-panel" style="display:none">

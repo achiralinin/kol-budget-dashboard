@@ -277,8 +277,24 @@ canvas { max-height: 280px; }
 .card.pl-profit.negative .card-value { color: var(--unpaid); }
 .card.pl-profit.neutral .card-value { color: var(--muted); }
 
+.pl-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.card.bk-creative { border-left-color: #a855f7; }
+.card.bk-media    { border-left-color: #06b6d4; }
+.card.bk-kol      { border-left-color: #f97316; }
+
+.card.bk-media.positive .card-value,
+.card.bk-kol.positive .card-value { color: var(--paid); }
+.card.bk-media.negative .card-value,
+.card.bk-kol.negative .card-value { color: var(--unpaid); }
+
 @media (max-width: 900px) {
   .pl-cards { grid-template-columns: 1fr; }
+  .pl-breakdown { grid-template-columns: 1fr; }
 }
 
 .error {
